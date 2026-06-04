@@ -10,7 +10,7 @@ import (
 
 // Provider is the base interface every billing backend implements.
 type Provider interface {
-	Name() string // "stripe" | "telegram_stars"
+	Name() string // "stripe" | "mercadopago" | "telegram_stars"
 
 	// CreateCheckout initiates a payment session. Returns an opaque URL or
 	// payload that the caller forwards to the user.
@@ -29,14 +29,16 @@ type Provider interface {
 
 // CheckoutRequest describes what to charge for.
 type CheckoutRequest struct {
-	TenantID   string
-	UserID     string
-	ProductID  string // e.g. course ID or plan identifier
-	PriceID    string // provider-side price/plan ID
-	SuccessURL string
-	CancelURL  string
-	TrialDays  int
-	Metadata   map[string]string
+	TenantID    string
+	UserID      string
+	ProductID   string // e.g. course ID or plan identifier
+	PriceID     string // provider-side price/plan ID
+	Currency    string // ISO-4217 currency code (e.g. USD, EUR, RUB)
+	AmountMinor int64  // monthly amount in minor units (cents/kopeks)
+	SuccessURL  string
+	CancelURL   string
+	TrialDays   int
+	Metadata    map[string]string
 }
 
 // CheckoutSession is returned after initiating a checkout flow.

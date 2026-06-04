@@ -1,3 +1,5 @@
+//go:build integration
+
 package stars_test
 
 import (

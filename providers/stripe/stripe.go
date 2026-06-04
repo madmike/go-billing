@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/madmike/go-billing/core"
@@ -50,14 +51,31 @@ func (p *Provider) Name() string { return "stripe" }
 func (p *Provider) CreateCheckout(_ context.Context, req core.CheckoutRequest) (*core.CheckoutSession, error) {
 	stripego.Key = p.secretKey
 
-	params := &stripego.CheckoutSessionParams{
-		Mode: stripego.String(string(stripego.CheckoutSessionModeSubscription)),
-		LineItems: []*stripego.CheckoutSessionLineItemParams{
-			{
-				Price:    stripego.String(req.PriceID),
-				Quantity: stripego.Int64(1),
+	lineItem := &stripego.CheckoutSessionLineItemParams{
+		Quantity: stripego.Int64(1),
+	}
+	if req.PriceID != "" {
+		lineItem.Price = stripego.String(req.PriceID)
+	} else {
+		currency := strings.ToLower(strings.TrimSpace(req.Currency))
+		if currency == "" || req.AmountMinor <= 0 {
+			return nil, fmt.Errorf("stripe checkout: price_id or (currency and amount_minor) is required")
+		}
+		lineItem.PriceData = &stripego.CheckoutSessionLineItemPriceDataParams{
+			Currency:   stripego.String(currency),
+			UnitAmount: stripego.Int64(req.AmountMinor),
+			ProductData: &stripego.CheckoutSessionLineItemPriceDataProductDataParams{
+				Name: stripego.String(defaultString(req.Metadata["plan_name"], req.ProductID)),
 			},
-		},
+			Recurring: &stripego.CheckoutSessionLineItemPriceDataRecurringParams{
+				Interval: stripego.String("month"),
+			},
+		}
+	}
+
+	params := &stripego.CheckoutSessionParams{
+		Mode:       stripego.String(string(stripego.CheckoutSessionModeSubscription)),
+		LineItems:  []*stripego.CheckoutSessionLineItemParams{lineItem},
 		SuccessURL: stripego.String(req.SuccessURL),
 		CancelURL:  stripego.String(req.CancelURL),
 		Metadata: map[string]string{
@@ -66,10 +84,16 @@ func (p *Provider) CreateCheckout(_ context.Context, req core.CheckoutRequest) (
 			"product_id": req.ProductID,
 		},
 	}
+	params.SubscriptionData = &stripego.CheckoutSessionSubscriptionDataParams{
+		Metadata: map[string]string{
+			"tenant_id":  req.TenantID,
+			"user_id":    req.UserID,
+			"product_id": req.ProductID,
+			"plan_code":  req.ProductID,
+		},
+	}
 	if req.TrialDays > 0 {
-		params.SubscriptionData = &stripego.CheckoutSessionSubscriptionDataParams{
-			TrialPeriodDays: stripego.Int64(int64(req.TrialDays)),
-		}
+		params.SubscriptionData.TrialPeriodDays = stripego.Int64(int64(req.TrialDays))
 	}
 
 	sess, err := session.New(params)
@@ -131,10 +155,11 @@ func (p *Provider) CancelSubscription(_ context.Context, subID string) error {
 // ─────────────────────────────────────────────────────────────
 
 func subscriptionToEvent(evtType string, sub *stripego.Subscription, provider string) *core.SubscriptionEvent {
+	plan := stripePlanFromSub(sub)
 	evt := &core.SubscriptionEvent{
 		SubscriptionID: sub.ID,
 		Provider:       provider,
-		Plan:           sub.Items.Data[0].Price.ID,
+		Plan:           plan,
 		Status:         stripeStatusToCore(string(sub.Status)),
 		PeriodStart:    time.Unix(sub.CurrentPeriodStart, 0),
 		PeriodEnd:      time.Unix(sub.CurrentPeriodEnd, 0),
@@ -143,6 +168,11 @@ func subscriptionToEvent(evtType string, sub *stripego.Subscription, provider st
 		evt.TenantID = sub.Metadata["tenant_id"]
 		evt.UserID = sub.Metadata["user_id"]
 		evt.ProductID = sub.Metadata["product_id"]
+		if v := strings.TrimSpace(sub.Metadata["plan_code"]); v != "" {
+			evt.Plan = v
+		} else if v := strings.TrimSpace(sub.Metadata["product_id"]); v != "" {
+			evt.Plan = v
+		}
 	}
 	if sub.TrialEnd != 0 {
 		t := time.Unix(sub.TrialEnd, 0)
@@ -165,10 +195,11 @@ func subscriptionToEvent(evtType string, sub *stripego.Subscription, provider st
 }
 
 func stripeSubToCore(sub *stripego.Subscription, provider string) *core.Subscription {
+	plan := stripePlanFromSub(sub)
 	s := &core.Subscription{
 		ID:          sub.ID,
 		Provider:    provider,
-		Plan:        sub.Items.Data[0].Price.ID,
+		Plan:        plan,
 		Status:      stripeStatusToCore(string(sub.Status)),
 		PeriodStart: time.Unix(sub.CurrentPeriodStart, 0),
 		PeriodEnd:   time.Unix(sub.CurrentPeriodEnd, 0),
@@ -178,6 +209,11 @@ func stripeSubToCore(sub *stripego.Subscription, provider string) *core.Subscrip
 		s.TenantID = sub.Metadata["tenant_id"]
 		s.UserID = sub.Metadata["user_id"]
 		s.ProductID = sub.Metadata["product_id"]
+		if v := strings.TrimSpace(sub.Metadata["plan_code"]); v != "" {
+			s.Plan = v
+		} else if v := strings.TrimSpace(sub.Metadata["product_id"]); v != "" {
+			s.Plan = v
+		}
 	}
 	if sub.TrialEnd != 0 {
 		t := time.Unix(sub.TrialEnd, 0)
@@ -203,4 +239,23 @@ func stripeStatusToCore(s string) core.SubscriptionStatus {
 	default:
 		return core.StatusExpired
 	}
+}
+
+func defaultString(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		return value
+	}
+	fallback = strings.TrimSpace(fallback)
+	if fallback != "" {
+		return fallback
+	}
+	return "Aulinq Subscription"
+}
+
+func stripePlanFromSub(sub *stripego.Subscription) string {
+	if sub == nil || sub.Items == nil || len(sub.Items.Data) == 0 || sub.Items.Data[0].Price == nil {
+		return ""
+	}
+	return sub.Items.Data[0].Price.ID
 }

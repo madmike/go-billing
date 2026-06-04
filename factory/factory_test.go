@@ -27,6 +27,12 @@ func TestFactoryCreate(t *testing.T) {
 			"telegram_stars",
 		},
 		{
+			"mercadopago provider",
+			Config{Preset: "mercadopago", AccessToken: "APP_USR_test_123"},
+			false,
+			"mercadopago",
+		},
+		{
 			"unknown preset",
 			Config{Preset: "unknown", SecretKey: "key"},
 			true,
@@ -62,6 +68,12 @@ func TestRegistryContainsTelegramStars(t *testing.T) {
 	require.True(t, ok, "telegram_stars not in registry")
 }
 
+// TestRegistryContainsMercadoPago verifies Mercado Pago is registered.
+func TestRegistryContainsMercadoPago(t *testing.T) {
+	_, ok := Registry["mercadopago"]
+	require.True(t, ok, "mercadopago not in registry")
+}
+
 // TestConfigGetSecretKey tests the Config getter.
 func TestConfigGetSecretKey(t *testing.T) {
 	cfg := Config{
@@ -83,7 +95,7 @@ func TestFactoryErrorMessageOnUnknownPreset(t *testing.T) {
 	cfg := Config{Preset: "nonexistent"}
 	_, err := Create(cfg)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "available: stripe, telegram_stars")
+	require.Contains(t, err.Error(), "available: stripe, mercadopago, telegram_stars")
 }
 
 // TestFactoryDirectRegistryUsage tests the factory lookup pattern.

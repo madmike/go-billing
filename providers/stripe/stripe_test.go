@@ -163,7 +163,7 @@ func TestHandleWebhook_SubscriptionCreated(t *testing.T) {
 	assert.Equal(t, "tenant-1", evt.TenantID)
 	assert.Equal(t, "user-1", evt.UserID)
 	assert.Equal(t, "prod_basic", evt.ProductID)
-	assert.Equal(t, "price_monthly", evt.Plan)
+	assert.Equal(t, "prod_basic", evt.Plan)
 	assert.Equal(t, core.StatusActive, evt.Status)
 	assert.NotEmpty(t, evt.EventID)
 }
@@ -179,6 +179,19 @@ func TestHandleWebhook_SubscriptionUpdated(t *testing.T) {
 
 	assert.Equal(t, core.EventUpdated, evt.Type)
 	assert.Equal(t, core.StatusTrialing, evt.Status)
+	assert.Equal(t, "prod_pro", evt.Plan)
+}
+
+func TestHandleWebhook_SubscriptionUpdated_FallsBackToPricePlan(t *testing.T) {
+	p := newProvider(t)
+	sub := stripeSubscription("sub_457", "trialing", "price_annual", "tenant-2", "user-2", "prod_pro")
+	sub["metadata"] = map[string]any{}
+	req := signedWebhook(t, testWebhookSecret, "customer.subscription.updated", sub)
+
+	evt, err := p.HandleWebhook(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, evt)
+
 	assert.Equal(t, "price_annual", evt.Plan)
 }
 
